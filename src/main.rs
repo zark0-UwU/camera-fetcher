@@ -8,12 +8,12 @@ use reqwest::blocking::{self};
 
 fn main() {
     let start = Instant::now();
-    let study_interval = Duration::from_secs(5 * 60); // 5 minutes
-    let snapshot_interval = Duration::from_secs(60 * 2); // 2 minutes
+    let study_interval = Duration::from_secs(24 * 60 * 60); // 24h minutes
+    let snapshot_interval = Duration::from_secs(60 * 2); // every 2 minutes
+    let url = "https://traficosevilla.es/camaras/cam28.jpg"; // using this cammera
 
     let mut last_downloaded = "".to_string();
 
-    let url = "https://traficosevilla.es/camaras/cam28.jpg";
     loop {
         let loop_start = Instant::now();
 
