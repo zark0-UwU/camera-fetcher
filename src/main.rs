@@ -63,11 +63,10 @@ fn fetch_image<'a>(image_url: &str, last_downloaded: &str) -> Result<String, Box
             let image = image::load_from_memory(&img_bytes).unwrap_or_default();
             let filename = date
                 .clone()
-                .replace("\"", "") // remove quoting from date string //TODO: fix this line, it appears to not be working
                 .replace(":", "-") //repalce invalid character on nextclod
                 .replace(" ", "_") // replace spaces for easier handling of files via terminal
                 .replace(",", ""); // remove "," se dividing weekday from the rest of the date time string for aesthetics reasons (since we replaced spaces with "_")
-            let path = format!("./images/{:?}.webp", filename);
+            let path = format!("./images/{}.webp", filename);
             //let path = "../images/test.webp";
             let _ = image.save_with_format(path.clone(), image::ImageFormat::WebP);
             println!("new image at {}", path);
