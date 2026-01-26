@@ -15,6 +15,8 @@ fn main() {
 
     let mut last_downloaded = "".to_string();
 
+    println!("Endless mode: {}", endless_study);
+
     loop {
         let loop_start = Instant::now();
 
