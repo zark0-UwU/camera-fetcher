@@ -9,6 +9,7 @@ use reqwest::blocking::{self};
 fn main() {
     let start = Instant::now();
     let study_interval = Duration::from_secs(24 * 60 * 60); // 24h minutes
+    let endless_study = true; // ignores study interval making the script run continusly
     let snapshot_interval = Duration::from_secs(60 * 2); // every 2 minutes
     let url = "https://traficosevilla.es/camaras/cam28.jpg"; // using this cammera
 
@@ -26,7 +27,7 @@ fn main() {
         let elapsed = loop_start.elapsed();
         let total_elapsed = start.elapsed();
 
-        if total_elapsed > study_interval {
+        if !endless_study && total_elapsed > study_interval {
             println!("\nENDED STUDY INTERVAL");
             break;
         }
