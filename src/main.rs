@@ -1,8 +1,7 @@
 use std::{
-    error::Error,
-    thread,
-    time::{Duration, Instant},
+    error::Error, fs, path::Path, thread, time::{Duration, Instant}
 };
+use chrono::{NaiveDateTime, Datelike};
 
 use reqwest::blocking::{self};
 
@@ -64,16 +63,31 @@ fn fetch_image<'a>(image_url: &str, last_downloaded: &str) -> Result<String, Box
             // if the date of the image is not the same as the last one, save it.
             let img_bytes = resp.bytes()?; // consume response
             let image = image::load_from_memory(&img_bytes).unwrap_or_default();
-            let filename = date
-                .clone()
-                .replace(":", "-") //repalce invalid character on nextclod
-                .replace(" ", "_") // replace spaces for easier handling of files via terminal
-                .replace(",", ""); // remove "," se dividing weekday from the rest of the date time string for aesthetics reasons (since we replaced spaces with "_")
-            let path = format!("./images/{}.webp", filename);
-            //let path = "../images/test.webp";
-            let _ = image.save_with_format(path.clone(), image::ImageFormat::WebP);
-            println!("new image at {}", path);
-            Ok(date.clone())
+             
+            // example: Thu, 05 Feb 2026 16:11:22 GMT
+            let parsed = NaiveDateTime::parse_from_str(&date, "%a, %d %b %Y %H:%M:%S GMT");
+            if parsed.is_err(){
+                println!("error parsing date")
+            }else{
+                let parsed_utc = parsed.unwrap().and_utc();
+                let month = parsed_utc.month();
+                let day = parsed_utc.day();
+
+                let new_filename = format!("{}.webp",parsed_utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, false).replace(":", "."));
+                
+                let str_path = format!("./images/{}/{}", month, day);
+                let folder_path =  Path::new(&str_path);
+                //if folder does not 
+                if folder_path.try_exists().is_ok_and(|v| !v){
+                    let _ = fs::create_dir_all(folder_path);
+                }
+                
+                let file_path = folder_path.join(new_filename);
+                
+                let _ = image.save_with_format(file_path.clone(), image::ImageFormat::WebP);
+                println!("new image at {}", file_path.to_string_lossy());
+            }
+                Ok(date.clone())
         } else {
             Ok(date.clone())
         }
