@@ -46,6 +46,7 @@ fn main() {
         Camera::new("https://trafico.sevilla.org/camaras/cam88.jpg", "Kansas city - Luis Montoto"),
         Camera::new("https://trafico.sevilla.org/camaras/cam23.jpg", "Glorieta de Santa Justa"),
         Camera::new("https://trafico.sevilla.org/camaras/cam10.jpg", "Ctra de carmona - Av de Llanes"),
+        Camera::new("https://trafico.sevilla.org/camaras/cam11.jpg", "kansas city - Ctra de carmona"),
     ];
 
     let start = Instant::now();
