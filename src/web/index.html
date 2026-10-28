@@ -1,0 +1,357 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport"
+      content="width=device-width" />
+<title>Camera Fetcher</title>
+<style>
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        font: 15px system-ui;
+        margin: 0;
+        background: #f4f5f7;
+        color: #222;
+    }
+
+    .layout {
+        display: grid;
+        grid-template-columns: 230px 1fr;
+        min-height: 100vh;
+    }
+
+    .sidebar {
+        background: white;
+        border-right: 1px solid #ddd;
+        padding: 1.2rem;
+    }
+
+    .main {
+        padding: 1.5rem;
+        min-width: 0;
+    }
+
+    h1 {
+        font-size: 1.3rem;
+    }
+
+    h2 {
+        font-size: 1rem;
+    }
+
+    .folder {
+        display: block;
+        width: 100%;
+        padding: 0.5rem;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        color: #315d9b;
+        overflow-wrap: anywhere;
+    }
+
+    .folder.active {
+        background: #eaf0fa;
+        font-weight: bold;
+    }
+
+    .crumb {
+        border: 0;
+        background: none;
+        color: #315d9b;
+        cursor: pointer;
+        padding: 0;
+    }
+
+    .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: 1rem;
+    }
+
+    .card {
+        display: block;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        overflow: hidden;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .card img {
+        width: 100%;
+        height: 150px;
+        object-fit: cover;
+        display: block;
+        background: #eee;
+    }
+
+    .caption {
+        padding: 0.6rem;
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+    }
+
+    textarea {
+        width: 100%;
+        height: 20rem;
+        font: 14px monospace;
+    }
+
+    button {
+        padding: 0.5rem;
+    }
+
+    @media (max-width: 650px) {
+        .layout {
+            grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+            border-right: 0;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .folder-list {
+            display: flex;
+            flex-wrap: wrap;
+        }
+    }
+
+    #settings-page {
+        display: none;
+        max-width: 800px;
+        margin: 2rem auto;
+        padding: 1.5rem;
+    }
+
+    body.settings-page .layout {
+        display: none;
+    }
+
+    body.settings-page #settings-page {
+        display: block;
+    }
+
+    .settings-link {
+        display: inline-block;
+        margin-bottom: 1rem;
+    }
+
+    #run-controls {
+        position: fixed;
+        z-index: 1;
+        top: 1rem;
+        right: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+</style>
+
+<div id="run-controls">
+    <span id="run-status">Checking…</span>
+    <button id="run-toggle"
+            type="button">Pause</button>
+</div>
+
+<div class="layout">
+    <aside class="sidebar">
+        <h1>Camera Fetcher</h1>
+        <a class="settings-link"
+           href="/settings">Settings</a>
+        <h2>Folders</h2>
+        <div id="folders"
+             class="folder-list"></div>
+    </aside>
+    <main class="main">
+        <div id="crumbs"></div>
+        <h2>Images</h2>
+        <div class="image-heading">
+            <h2>Images</h2>
+            <a id="download-folder"
+               class="crumb">Download folder as tar</a>
+        </div>
+        <div id="images"
+             class="grid"></div>
+    </main>
+</div>
+
+<section id="settings-page">
+    <a href="/">← Images</a>
+    <h1>Configuration</h1>
+    <textarea id="config"
+              aria-label="Configuration"></textarea><br />
+    <button onclick="save()">Save configuration</button>
+    <span id="status"></span>
+</section>
+
+<script>
+    let files = [];
+    let current = '';
+    let loopPaused = false;
+
+    const url = file =>
+        '/' + file.split('/').map(encodeURIComponent).join('/');
+
+    function parent(path) {
+        const index = path.lastIndexOf('/');
+        return index < 0 ? '' : path.slice(0, index);
+    }
+
+    function timestampValue(file) {
+        const match = file.match(/\d{10,13}/);
+        if (!match) return 0;
+        const value = Number(match[0]);
+        return match[0].length === 10 ? value * 1000 : value;
+    }
+
+    function timestamp(file) {
+        const value = timestampValue(file);
+        return value ? new Date(value).toLocaleString() : '';
+    }
+
+    function makeFolderButton(label, path, active = false) {
+        const button = document.createElement('button');
+        button.className = `folder${active ? ' active' : ''}`;
+        button.textContent = `📁 ${label}`;
+        button.addEventListener('click', () => {
+            current = path;
+            render();
+        });
+        return button;
+    }
+
+    function render() {
+        const dirs = new Set();
+
+        for (const file of files) {
+            let dir = parent(file);
+            while (dir) {
+                dirs.add(dir);
+                dir = parent(dir);
+            }
+        }
+
+        const folders = document.querySelector('#folders');
+        folders.replaceChildren(makeFolderButton('All images', '', !current));
+
+        [...dirs]
+            .filter(dir => parent(dir) === current)
+            .sort()
+            .forEach(dir => {
+                folders.append(makeFolderButton(
+                    dir.split('/').pop(),
+                    dir,
+                    dir === current
+                ));
+            });
+
+        const crumbs = document.querySelector('#crumbs');
+        crumbs.replaceChildren();
+
+        const addCrumb = (label, path) => {
+            const button = document.createElement('button');
+            button.className = 'crumb';
+            button.textContent = label;
+            button.addEventListener('click', () => {
+                current = path;
+                render();
+            });
+            crumbs.append(button);
+        };
+
+        addCrumb('All images', '');
+        let path = '';
+        for (const part of current.split('/').filter(Boolean)) {
+            crumbs.append(document.createTextNode(' / '));
+            path = path ? `${path}/${part}` : part;
+            addCrumb(part, path);
+        }
+
+        document.querySelector('#download-folder').href =
+            `/download?folder=${encodeURIComponent(current)}`;
+
+        const imageGrid = document.querySelector('#images');
+        imageGrid.replaceChildren();
+
+        const shown = files.filter(file =>
+            !current || file.startsWith(`${current}/`)
+        );
+        if (!shown.length) {
+            const empty = document.createElement('p');
+            empty.textContent = 'No images in this folder.';
+            return;
+        }
+
+        for (const file of shown) {
+            const card = document.createElement('a');
+            card.className = 'card';
+            card.href = url(file);
+
+            const image = document.createElement('img');
+            image.loading = 'lazy';
+            image.src = url(file);
+            image.alt = '';
+
+            const caption = document.createElement('div');
+            caption.className = 'caption';
+            caption.textContent = `${file.split('/').pop()}\n${timestamp(file)}`;
+
+            card.append(image, caption);
+            imageGrid.append(card);
+        }
+    }
+
+    const settingsPage = location.pathname === '/settings';
+    document.body.classList.toggle('settings-page', settingsPage);
+
+    async function load() {
+        if (settingsPage) {
+            document.querySelector('#config').value =
+                await (await fetch('/config')).text();
+            return;
+        }
+
+        files = await (await fetch('/files')).json();
+        files.sort((a, b) =>
+            timestampValue(b) - timestampValue(a) || b.localeCompare(a)
+        );
+        render();
+        document.querySelector('#config').value =
+            await (await fetch('/config')).text();
+    }
+
+    async function save() {
+        const response = await fetch('/save-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: document.querySelector('#config').value
+        });
+        document.querySelector('#status').textContent =
+            response.ok ? 'Saved' : 'Save failed';
+    }
+
+    async function refreshRunState() {
+        const response = await fetch('/run-state');
+        loopPaused = (await response.text()).trim() === 'paused';
+        document.querySelector('#run-status').textContent =
+            loopPaused ? 'Paused' : 'Running';
+        document.querySelector('#run-toggle').textContent =
+            loopPaused ? 'Continue' : 'Pause';
+    }
+
+    document.querySelector('#run-toggle').addEventListener('click', async () => {
+        await fetch(`/run-state?paused=${!loopPaused}`, { method: 'POST' });
+        await refreshRunState();
+    });
+
+    refreshRunState();
+    setInterval(refreshRunState, 5000);
+
+    load();
+</script>

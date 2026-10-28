@@ -8,3 +8,6 @@ exclude = ["images/*"]
 chrono = "0.4.43"
 image = "0.25.9"
 reqwest = {version="0.13.1", features = ["blocking"]}
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml = "0.9.34"
+tar = "0.4.46"

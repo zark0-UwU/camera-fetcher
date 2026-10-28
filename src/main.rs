@@ -1,146 +1,126 @@
+mod camera;
+mod web;
+use crate::camera::Camera;
+use serde::Deserialize;
 use std::{
-    error::Error, fs, path::Path, thread, time::{Duration, Instant}
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+    print,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
 };
-use chrono::{NaiveDateTime, Datelike};
 
-use reqwest::blocking::{self};
-
-#[derive(Clone)]
-struct Camera {
-    url: String,
-    name: String,
-    last_downloaded: String,
+#[derive(Debug, Deserialize)]
+struct Config {
+    save_path: PathBuf,
+    fetching_paused_at_startup: bool,
+    username: String,
+    password: String,
 }
 
-impl Camera {
-/*     fn new_from_name(camera_name: &str) -> Camera{
-            Camera {
-            url: format!("https://trafico.sevilla.org/camaras/{}.jpg", camera_name).to_string(),
-            name: camera_name.to_string(),
-            last_downloaded: String::from(""),
-        }
-    }
-    fn new_from_id(camera_id: i16) -> Camera{
-            Camera {
-            url: format!("https://trafico.sevilla.org/camaras/cam{}.jpg", camera_id).to_string(),
-            name: format!("cam{}",camera_id).to_string(),
-            last_downloaded: String::from(""),
-        }
-    } */
-    fn new(url: &str, name: &str) -> Camera{
-            Camera {
-            url: url.to_string(),
-            name: name.to_string(),
-            last_downloaded: String::from(""),
-        }
-    }
+#[derive(Debug, Deserialize)]
+struct CamerasCfg {
+    cameras: Vec<CameraConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CameraConfig {
+    name: String,
+    url: String,
+}
+
+fn read_config(path: impl AsRef<Path>) -> Result<Config, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    Ok(serde_yaml::from_str(&contents)?)
+}
+fn read_camera_list(path: impl AsRef<Path>) -> Result<CamerasCfg, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    Ok(serde_yaml::from_str(&contents)?)
 }
 
 fn main() {
-    
-    let mut cameras = [
-        Camera::new("https://trafico.sevilla.org/camaras/cam28.jpg", "Plaza de cuba (puente de san telmo)"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam9.jpg", "Puente Isabel II - Paseo Colon - Arjona"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam73.jpg", "Puerta de la carne - Menendez y Pelayo"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam26.jpg", "Av de la Palmera - Bueno Monreal"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam88.jpg", "Kansas city - Luis Montoto"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam23.jpg", "Glorieta de Santa Justa"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam10.jpg", "Ctra de carmona - Av de Llanes"),
-        Camera::new("https://trafico.sevilla.org/camaras/cam11.jpg", "kansas city - Ctra de carmona"),
+    let mut cameras = vec![
+        //Camera::new("", ""),                                                                           //Camera::new("", ""),
     ];
 
+    let config = read_config("config/global.yml").unwrap();
+    let camera_config = read_camera_list("config/camera-fetcher.yml").unwrap();
+    let save_path = &config.save_path;
+
+    for cam_cfg in camera_config.cameras {
+        cameras.push(Camera::new(&cam_cfg.url, &cam_cfg.name));
+    }
+
+    let paused = Arc::new(AtomicBool::new(config.fetching_paused_at_startup));
+    let loop_paused = Arc::clone(&paused);
+    let loop_save_path = save_path.clone();
+
+    thread::spawn(move || {
+        run_camera_loop(cameras, loop_save_path, loop_paused);
+    });
+
+    web::serve(paused).expect("Failed to start web server");
+}
+
+fn run_camera_loop(mut cameras: Vec<Camera>, save_path: PathBuf, paused: Arc<AtomicBool>) {
     let start = Instant::now();
-    let study_interval = Duration::from_secs(24 * 60 * 60); // 24h minutes
+    let study_interval = Duration::from_secs(3 * 24 * 60 * 60); // 3 days in minutes
     let endless_study = true; // ignores study interval making the script run continusly
     let snapshot_interval = Duration::from_secs(60 * 2); // every 2 minutes
 
-    println!("Endless mode: {}", endless_study);
+    let mut pause_notified = false;
+    let mut resume_notified = true;
+
+    println!("endless_study: {}", endless_study);
+    println!("paused at startup: {}", paused.load(Ordering::Relaxed));
 
     loop {
+        while paused.load(Ordering::Relaxed) {
+            if !pause_notified {
+                println!("PAUSED");
+                pause_notified = true;
+                resume_notified = false;
+            }
+            thread::sleep(Duration::from_millis(2000));
+        }
+
         let loop_start = Instant::now();
 
-        // ---- Task start ----
-        let mut cam_index = 0;
-        while cam_index < cameras.len(){
+        for cam_index in 0..cameras.len() {
+            if paused.load(Ordering::Relaxed) {
+                break;
+            } else {
+                if !resume_notified {
+                    println!("RESUMED");
+                    resume_notified = true;
+                    pause_notified = false;
+                }
+            }
+
             println!("\nRunning task at {:?}", loop_start);
-            let _ = fetch_image(cameras[cam_index].clone()).inspect(|new| cameras[cam_index].last_downloaded = new.clone());
-            cam_index += 1;
+            let result = cameras[cam_index].fetch_image(save_path.to_str().unwrap());
+            if let Ok(new) = result {
+                cameras[cam_index].last_downloaded = new;
+            }
         }
-        // ---- Task end ----
 
         let elapsed = loop_start.elapsed();
-        let total_elapsed = start.elapsed();
-
-        if !endless_study && total_elapsed > study_interval {
+        if !endless_study && start.elapsed() > study_interval {
             println!("\nENDED STUDY INTERVAL");
             break;
         }
-        if elapsed < snapshot_interval {
-            thread::sleep(snapshot_interval - elapsed);
-        } else {
-            // If the task took longer than the snapshot_interval, continue immediately.
-            eprintln!(
-                "Warning: task took longer ({:?}) than snapshot_interval {:?}",
-                elapsed, snapshot_interval
-            );
-        }
-    }
-}
 
-// fetches the image url, and checks the asociated date, if date!=last_downloaded image is saved to file system and returns ok
-fn fetch_image<'a>(camera: Camera) -> Result<String, Box<dyn Error>> {
-    print!("requesting data");
-    let resp = blocking::get(camera.url)?;
-    let date: String;
-    if resp.status().is_success() {
-        date = resp
-            .headers()
-            .get("last-modified")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_owned())
-            .unwrap_or_default(); // take an owned String
-
-        print!(" => succesfull http request!\n");
-
-        if date != camera.last_downloaded {
-            // if the date of the image is not the same as the last one, save it.
-            let img_bytes = resp.bytes()?; // consume response
-            let image = image::load_from_memory(&img_bytes).unwrap_or_default();
-             
-            // example: Thu, 05 Feb 2026 16:11:22 GMT
-            let parsed = NaiveDateTime::parse_from_str(&date, "%a, %d %b %Y %H:%M:%S GMT");
-            if parsed.is_err(){
-                println!("error parsing date")
-            }else{
-                let parsed_utc = parsed.unwrap().and_utc();
-                let month = parsed_utc.month();
-                let day = parsed_utc.day();
-
-                // make file name compliant with file system restrictions
-                let new_filename = format!("{}.webp",parsed_utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, false).replace(":", "."));
-                
-                // construct the file path
-                let str_path = format!("./images/{}/{}/{}", camera.name, month, day);
-                let folder_path =  Path::new(&str_path);
-                
-                //if folder does not exist create it
-                if folder_path.try_exists().is_ok_and(|v| !v){
-                    let _ = fs::create_dir_all(folder_path);
-                }
-                
-                let file_path = folder_path.join(new_filename);
-                
-                // Save image file
-                let _ = image.save_with_format(file_path.clone(), image::ImageFormat::WebP);
-                println!("new image at {}", file_path.to_string_lossy());
+        let wait_until = Instant::now() + snapshot_interval.saturating_sub(elapsed);
+        while Instant::now() < wait_until {
+            while paused.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(250));
             }
-                Ok(date.clone())
-        } else {
-            Ok(date.clone())
+            thread::sleep(Duration::from_millis(250).min(wait_until - Instant::now()));
         }
-    } else {
-        let msg = format!("Request failed: {}", resp.status());
-        eprintln!("{}", msg);
-        Err(msg.into())
     }
 }

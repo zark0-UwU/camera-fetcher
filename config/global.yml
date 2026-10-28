@@ -1,0 +1,4 @@
+save_path: ./images
+username: your-username
+password: your-password
+fetching_paused_at_startup: false
