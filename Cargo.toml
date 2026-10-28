@@ -1,5 +1,5 @@
 [package]
-name = "cammera-fetcher"
+name = "camera-fetcher"
 version = "0.1.0"
 edition = "2024"
 exclude = ["images/*"]
@@ -7,7 +7,7 @@ exclude = ["images/*"]
 [dependencies]
 chrono = "0.4.43"
 image = "0.25.9"
-reqwest = {version="0.13.1", features = ["blocking"]}
+reqwest = { version = "0.13.1", features = ["blocking"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9.34"
 tar = "0.4.46"

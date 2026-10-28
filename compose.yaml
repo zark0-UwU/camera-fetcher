@@ -1,0 +1,13 @@
+services:
+  camera-fetcher:
+    build:
+      context: .
+      args:
+        BIN_NAME: camera-fetcher
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config:ro
+      - camera-images:/app/images
+
+volumes:
+  camera-images:
